@@ -10,6 +10,5 @@
 /lgbm_importances01.png
 /baseline_lgb_domain_features.csv
 /feature_importances.csv
-/mlartifacts/
 /mlruns/
 /.idea/
