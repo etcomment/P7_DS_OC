@@ -1,0 +1,13 @@
+/artefacts/
+/random_forest_baseline_engineered.csv
+/random_forest_baseline_domain.csv
+/random_forest_baseline.csv
+/baseline_lgb.csv
+/features_used.txt
+/submission_kernel02.csv
+/todo
+/log_reg_baseline.csv
+/lgbm_importances01.png
+/baseline_lgb_domain_features.csv
+/feature_importances.csv
+/mlartifacts/
