@@ -87,6 +87,7 @@ def application_train_test(num_rows=None, nan_as_category=False):
     df['PAYMENT_RATE'] = df['AMT_ANNUITY'] / df['AMT_CREDIT']
     del test_df
     gc.collect()
+
     return df
 
 
