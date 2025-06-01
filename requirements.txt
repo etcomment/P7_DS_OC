@@ -7,3 +7,4 @@ mlflow_skinny==2.22.0
 numpy==2.2.6
 pandas==2.2.3
 Requests==2.32.3
+pickle
