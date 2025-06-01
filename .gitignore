@@ -12,3 +12,5 @@
 /feature_importances.csv
 /mlruns/
 /.idea/
+/model.pkl
+/workspace/
