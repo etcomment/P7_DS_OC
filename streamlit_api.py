@@ -13,15 +13,15 @@ st.title("🧾 Scoring Bancaire - Vérification d'Éligibilité")
 # ---------- CHARGEMENT DES FEATURES ----------
 @st.cache_data
 def load_features():
-    with open("feature.txt", "r") as f:
+    with open("features_used.txt", "r") as f:
         return [line.strip() for line in f if line.strip()]
 
 all_features = load_features()
 
 # ---------- FONCTION POUR CALCULER DAYS_BIRTH ----------
-def calculate_days_birth(birthdate):
+def age_en_nbjours(date_naissance):
     today = datetime.date.today()
-    delta = today - birthdate
+    delta = today - date_naissance
     return -delta.days  # LightGBM attend un nombre négatif pour DAYS_BIRTH
 
 # ---------- FORMULAIRE ----------
@@ -30,10 +30,10 @@ user_input = {}
 columns = st.columns(3)
 
 # Champs obligatoires
-birthdate = columns[0].date_input("Date de naissance *", value=datetime.date(1990, 1, 1))
+date_naissance = columns[0].date_input("Date de naissance *", value=datetime.date(1990, 1, 1))
 payment_rate = columns[1].number_input("PAYMENT_RATE *", min_value=0.0, format="%.6f")
 
-user_input["DAYS_BIRTH"] = calculate_days_birth(birthdate)
+user_input["DAYS_BIRTH"] = age_en_nbjours(date_naissance)
 user_input["PAYMENT_RATE"] = payment_rate
 
 # Champs facultatifs
