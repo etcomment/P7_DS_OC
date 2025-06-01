@@ -15,6 +15,9 @@
 # - Removed index from features
 # - Use standard KFold CV (not stratified)
 
+#(base) stiven@stiven-fixe:~/Documents/formation data scientist/stiven/source/P7_DS_OC$ mlflow ui --backend-store-uri file:/home/stiven/Documents/formation\ data\ scientist/stiven/source/P7_DS_OC/mlruns
+
+
 import numpy as np
 import pandas as pd
 import gc
@@ -322,6 +325,17 @@ def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
     # Nettoyage des noms de colonnes catégorielles également
     categorical_clean = [rename_dict[c] for c in categorical if c in rename_dict]
 
+    # Supposons que train_df est ton DataFrame d'entraînement
+    feature_types = train_df.dtypes.reset_index()
+    feature_types.columns = ['feature', 'dtype']
+
+    # Sauvegarder dans un fichier temporaire
+    features_path = "feature_types.csv"
+    feature_types.to_csv(features_path, index=False)
+
+    # Enregistrer comme artefact dans MLflow
+    mlflow.log_artifact(features_path, artifact_path="metadata")
+
     for n_fold, (train_idx, valid_idx) in enumerate(folds.split(train_df[feats], train_df['TARGET'])):
         train_x, train_y = train_df[feats].iloc[train_idx], train_df['TARGET'].iloc[train_idx]
         valid_x, valid_y = train_df[feats].iloc[valid_idx], train_df['TARGET'].iloc[valid_idx]
@@ -494,7 +508,7 @@ def main(debug=False):
         del cc
         gc.collect()
     with timer("Run LightGBM with kfold"):
-        feat_importance = kfold_lightgbm(df, num_folds=6, stratified=False, debug=debug)
+        feat_importance = kfold_lightgbm(df, num_folds=2, stratified=False, debug=True)
 
 
 if __name__ == "__main__":

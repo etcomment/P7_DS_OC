@@ -9,7 +9,7 @@ app = Flask(__name__)
 model = joblib.load('model.pkl')
 
 # Chargement de la liste des features
-with open("feature.txt", "r") as f:
+with open("features_used.txt", "r") as f:
     all_features = [line.strip() for line in f if line.strip()]
 
 @app.route("/")
@@ -33,7 +33,23 @@ def predict():
         input_df = input_df[all_features]
 
         # Forcer le typage des colonnes catégorielles si nécessaire :
-        # Ex : input_df['csp'] = input_df['csp'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Active_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Active_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Active_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Active_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Approved_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Approved_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Approved_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Approved_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Completed_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Completed_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Completed_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Completed_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Demand_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Demand_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Demand_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Demand_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Refused_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Refused_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Refused_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Refused_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Signed_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Signed_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_Signed_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Signed_MAX'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_nan_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_nan_MIN'].astype('category')
+        input_df['CC_NAME_CONTRACT_STATUS_nan_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_nan_MAX'].astype('category')
+
 
         # Prédiction
         score = model.predict_proba(input_df)[0, 1]
