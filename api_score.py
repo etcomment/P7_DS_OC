@@ -10,11 +10,18 @@ app = Flask(__name__)
 # Chargement du modèle
 #model = joblib.load('model.pkl')
 
+headers = {
+    "Authorization": "",  # Remplacez avec votre token
+    "Accept": "application/vnd.github.v3.raw"    # Facultatif mais recommandé
+}
 url = "https://github.com/etcomment/P7_DS_OC/raw/refs/heads/API/mlartifacts/0/1dc35f31d41a47f5a8698f78ef00ea0f/artifacts/model/model.pkl"
-response = requests.get(url)
-
-with open("model.pkl", "wb") as f:
-    f.write(response.content)
+response = requests.get(url, headers=headers)
+if response.status_code == 200:
+    with open("model.pkl", "wb") as f:
+        f.write(response.content)
+    print("Modèle téléchargé avec succès !")
+else:
+    print(f"Erreur {response.status_code} : {response.text}")
 
 # Charger le modèle
 with open("model.pkl", "rb") as f:
