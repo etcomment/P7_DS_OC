@@ -4,8 +4,18 @@ import pandas as pd
 import numpy as np
 import requests
 import pickle
+import waitress
 
 app = Flask(__name__)
+
+file_id = '1Y8qjL3nPUO7oAAU06LS4_z4DDkomo4BI'  # à extraire de l'URL
+download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+
+response = requests.get(download_url)
+with open("model.pkl", "wb") as f:
+    f.write(response.content)
+
+print("✅ Fichier modele téléchargé !")
 
 file_id = '1B2E6jfa1DZVdz5yGDeBitJ_0cS-qeUR2'  # à extraire de l'URL
 download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
@@ -72,4 +82,4 @@ def predict():
         return jsonify({'error': str(e)}), 400
 
 if __name__ == "__main__":
-    app.run(port=5001,debug=True)
+    waitress.serve(app, host="0.0.0.0", port=5001)
