@@ -7,21 +7,29 @@ import pickle
 
 app = Flask(__name__)
 
+# modele https://drive.google.com/file/d/1Y8qjL3nPUO7oAAU06LS4_z4DDkomo4BI/view?usp=sharing
+# features https://drive.google.com/file/d/1B2E6jfa1DZVdz5yGDeBitJ_0cS-qeUR2/view?usp=sharing
 # Chargement du modèle
 #model = joblib.load('model.pkl')
 
-headers = {
-    "Authorization": "",  # Remplacez avec votre token
-    "Accept": "application/vnd.github.v3.raw"    # Facultatif mais recommandé
-}
-url = "https://github.com/etcomment/P7_DS_OC/raw/refs/heads/API/mlartifacts/0/1dc35f31d41a47f5a8698f78ef00ea0f/artifacts/model/model.pkl"
-response = requests.get(url, headers=headers)
-if response.status_code == 200:
-    with open("model.pkl", "wb") as f:
-        f.write(response.content)
-    print("Modèle téléchargé avec succès !")
-else:
-    print(f"Erreur {response.status_code} : {response.text}")
+
+file_id = '1Y8qjL3nPUO7oAAU06LS4_z4DDkomo4BI'  # à extraire de l'URL
+download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+
+response = requests.get(download_url)
+with open("model.pkl", "wb") as f:
+    f.write(response.content)
+
+print("✅ Fichier modele téléchargé !")
+
+file_id = '1B2E6jfa1DZVdz5yGDeBitJ_0cS-qeUR2'  # à extraire de l'URL
+download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+
+response = requests.get(download_url)
+with open("features_used.txt", "wb") as f:
+    f.write(response.content)
+
+print("✅ Fichier features téléchargé !")
 
 # Charger le modèle
 with open("model.pkl", "rb") as f:
