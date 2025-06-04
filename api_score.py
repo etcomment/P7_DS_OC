@@ -2,11 +2,23 @@ from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
 import numpy as np
+import requests
+import pickle
 
 app = Flask(__name__)
 
-# Chargement du modèle
-model = joblib.load('model.pkl')
+file_id = '1B2E6jfa1DZVdz5yGDeBitJ_0cS-qeUR2'  # à extraire de l'URL
+download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+
+response = requests.get(download_url)
+with open("features_used.txt", "wb") as f:
+    f.write(response.content)
+
+print("✅ Fichier features téléchargé !")
+
+# Charger le modèle
+with open("model.pkl", "rb") as f:
+    model = pickle.load(f)
 
 # Chargement de la liste des features
 with open("features_used.txt", "r") as f:
@@ -60,4 +72,4 @@ def predict():
         return jsonify({'error': str(e)}), 400
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(port=5001,debug=True)

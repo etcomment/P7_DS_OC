@@ -69,7 +69,7 @@ if st.button("✅ Vérifier l’éligibilité"):
     else:
         try:
             # Appel à l'API Flask (local ou déployée)
-            api_url = "http://127.0.0.1:5000/predict"  # ⚠️ changer cette URL si déployé sur Azure
+            api_url = "http://127.0.0.1:5001/predict"  # ⚠️ changer cette URL si déployé sur Azure
             response = requests.post(api_url, json=user_input)
 
             if response.status_code == 200:
