@@ -25,6 +25,7 @@ import time
 from contextlib import contextmanager
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
+from sklearn.impute import SimpleImputer
 from sklearn.metrics import roc_auc_score, roc_curve, recall_score, precision_score, f1_score
 from sklearn.model_selection import KFold, StratifiedKFold
 import matplotlib.pyplot as plt
@@ -36,6 +37,9 @@ import mlflow.data
 from mlflow.data.pandas_dataset import PandasDataset
 from sklearn.metrics import confusion_matrix
 import mlflow.lightgbm
+from sklearn.model_selection import train_test_split
+from imblearn.over_sampling import SMOTE
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import re
@@ -68,9 +72,10 @@ def one_hot_encoder(df, nan_as_category=True):
 def application_train_test(num_rows=None, nan_as_category=False):
     # Read data and merge
     df = pd.read_csv('./artefacts/data/application_train.csv', nrows=num_rows, encoding='ISO-8859-1')
-    test_df = pd.read_csv('./artefacts/data/application_test.csv', nrows=num_rows, encoding='ISO-8859-1')
-    print("Train samples: {}, test samples: {}".format(len(df), len(test_df)))
-    df = pd.concat([df,test_df], ignore_index=True).reset_index()
+    #test_df = pd.read_csv('./artefacts/data/application_test.csv', nrows=num_rows, encoding='ISO-8859-1')
+    #print("Train samples: {}, test samples: {}".format(len(df), len(test_df)))
+    print("Train samples: {}".format(len(df)))
+    #df = pd.concat([df,test_df], ignore_index=True).reset_index()
     # Optional: Remove 4 applications with XNA CODE_GENDER (train set)
     df = df[df['CODE_GENDER'] != 'XNA']
 
@@ -88,7 +93,7 @@ def application_train_test(num_rows=None, nan_as_category=False):
     df['INCOME_PER_PERSON'] = df['AMT_INCOME_TOTAL'] / df['CNT_FAM_MEMBERS']
     df['ANNUITY_INCOME_PERC'] = df['AMT_ANNUITY'] / df['AMT_INCOME_TOTAL']
     df['PAYMENT_RATE'] = df['AMT_ANNUITY'] / df['AMT_CREDIT']
-    del test_df
+    #del test_df
     gc.collect()
     return df
 
@@ -269,26 +274,37 @@ def credit_card_balance(num_rows=None, nan_as_category=True):
     gc.collect()
     return cc_agg
 
+def split_and_smote(df):
+    X_train, X_test, y_train, y_test = train_test_split(
+        df.drop(['TARGET'],axis=1), df['TARGET'],
+        test_size=0.20, random_state=42, stratify=df['TARGET'])
+    print("PRE SMOTE Train shape: {}, test shape: {}".format(X_train.shape, X_test.shape))
+    # Application de SMOTE sur le train uniquement
+
+    return X_train, y_train, X_test, y_test
+
 
 # LightGBM GBDT with KFold or Stratified KFold
 # Parameters from Tilii kernel: https://www.kaggle.com/tilii7/olivier-lightgbm-parameters-by-bayesian-opt/code
-def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
+#def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
+def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True, debug=False):
     # Tentative de conversion des colonnes object en float
     # Liste pour les colonnes catégorielles problématiques
     categorical = []
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].astype('category')
+    for col in X_train.columns:
+        if X_train[col].dtype == 'object':
+            X_train[col] = X_train[col].astype('category')
+            X_test[col] = X_test[col].astype('category')
             categorical.append(col)
 
     # Log des paramètres d'expérience
     mlflow.log_param("n_folds", num_folds)
 
     # Divide in training/validation and test data
-    train_df = df[df['TARGET'].notnull()]
-    test_df = df[df['TARGET'].isnull()]
+    train_df = X_train
+    test_df = X_test
     print("Starting LightGBM. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
-    del df
+    #del df
     gc.collect()
     # Cross validation model
     if stratified:
@@ -336,11 +352,20 @@ def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
     # Enregistrer comme artefact dans MLflow
     mlflow.log_artifact(features_path, artifact_path="metadata")
 
-    for n_fold, (train_idx, valid_idx) in enumerate(folds.split(train_df[feats], train_df['TARGET'])):
-        train_x, train_y = train_df[feats].iloc[train_idx], train_df['TARGET'].iloc[train_idx]
-        valid_x, valid_y = train_df[feats].iloc[valid_idx], train_df['TARGET'].iloc[valid_idx]
+    for n_fold, (train_idx, valid_idx) in enumerate(folds.split(train_df[feats], y_train)):
+        train_x, train_y = train_df[feats].iloc[train_idx], y_train.iloc[train_idx]
+        valid_x, valid_y = train_df[feats].iloc[valid_idx], y_train.iloc[valid_idx]
 
-        #,INSERT SMOT ici
+        # Nettoyage des valeurs infinies
+        train_x.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+        # Imputation avant SMOTE
+        imputer = SimpleImputer(strategy='mean')
+        train_x_imputed = pd.DataFrame(imputer.fit_transform(train_x), columns=train_x.columns)
+
+        smote = SMOTE(random_state=42)
+        train_x, train_y = smote.fit_resample(train_x_imputed, train_y)
+        print("POST SMOTE Train shape: {}, test shape: {}".format(X_train.shape, y_train.shape))
         # Construction des datasets LightGBM avec support des colonnes catégorielles
         lgb_train = lgb.Dataset(train_x, label=train_y, categorical_feature=categorical_clean, free_raw_data=False)
         lgb_valid = lgb.Dataset(valid_x, label=valid_y, categorical_feature=categorical_clean, reference=lgb_train, free_raw_data=False)
@@ -433,9 +458,9 @@ def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
         gc.collect()
 
     dummy = DummyClassifier(strategy="most_frequent")
-    dummy.fit(train_df[feats], train_df["TARGET"])
+    dummy.fit(train_df[feats], y_train)
     dummy_preds = dummy.predict_proba(train_df[feats])[:, 1]
-    dummy_score = roc_auc_score(train_df["TARGET"], dummy_preds)
+    dummy_score = roc_auc_score(y_train, dummy_preds)
 
     print("Dummy AUC score: {:.6f}".format(dummy_score))
     mlflow.log_metric("dummy_auc", dummy_score)
@@ -508,7 +533,11 @@ def main(debug=False):
         del cc
         gc.collect()
     with timer("Run LightGBM with kfold"):
-        feat_importance = kfold_lightgbm(df, num_folds=2, stratified=False, debug=True)
+        print(df.describe())
+        print(df.info)
+        print(df['TARGET'].value_counts())
+        Xtr,yTr,Xtst,Ytst = split_and_smote(df)
+        feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=False, debug=True)
 
 
 if __name__ == "__main__":
