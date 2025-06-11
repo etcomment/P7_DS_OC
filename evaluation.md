@@ -2,13 +2,13 @@
 
 Sélectionner et entraîner des modèles adaptés à une problématique métier afin de réaliser une analyse prédictive.
 
-- [ ] **CE1** Les variables catégorielles identifiées ont été transformées en fonction du besoin (par exemple via OneHotEncoder ou TargetEncoder).  
-- [ ] **CE2** Le candidat a créé de nouvelles variables à partir de variables existantes.  
+- [X] **CE1** Les variables catégorielles identifiées ont été transformées en fonction du besoin (par exemple via OneHotEncoder ou TargetEncoder).  
+- [X] **CE2** Le candidat a créé de nouvelles variables à partir de variables existantes.  
 - [ ] **CE3** Le candidat a réalisé des transformations mathématiques lorsque c'est requis pour transformer les distributions de variables.  
 - [ ] **CE4** Le candidat a normalisé les variables lorsque c'est requis.  
 - [ ] **CE5** Le candidat a défini sa stratégie d’élaboration d’un modèle pour répondre à un besoin métier.  
     - Cela signifie dans ce projet que l’étudiant a présenté son approche méthodologique de modélisation dans son support de présentation pendant la soutenance et est capable de répondre à des questions à ce sujet.  
-- [ ] **CE6** Le candidat a choisi la ou les variables cibles pertinentes.  
+- [X] **CE6** Le candidat a choisi la ou les variables cibles pertinentes.  
 - [ ] **CE7** Le candidat a vérifié qu'il n’y a pas de problème de data leakage.  
 - [ ] **CE8** Le candidat a testé plusieurs algorithmes de façon cohérente, en partant des plus simples vers les plus complexes (au minimum un linéaire et un non linéaire).  
 
@@ -51,8 +51,8 @@ Centralisation du stockage des modèles, formalisation des résultats et industr
 Assurer l’intégration et la diffusion du modèle auprès de collaborateurs.
 
 - [X] **CE1** Le candidat a créé un dossier Git avec tous les scripts du projet et l’a partagé sur GitHub.  
-- [ ] **CE2** Le candidat a présenté un historique de modifications avec au moins trois versions distinctes.  
-- [ ] **CE3** Le candidat a tenu à jour la liste des packages et versions utilisés.  
+- [X] **CE2** Le candidat a présenté un historique de modifications avec au moins trois versions distinctes.  
+- [X] **CE3** Le candidat a tenu à jour la liste des packages et versions utilisés.  
 - [ ] **CE4** Le candidat a rédigé un fichier introductif expliquant le projet et la structure.  
 - [X] **CE5** Le candidat a commenté les scripts pour faciliter la collaboration.
 

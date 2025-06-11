@@ -9,6 +9,7 @@
 # - One-hot encoding for categorical features
 # All tables are joined with the application DF using the SK_ID_CURR key (except bureau_balance).
 # You can use LightGBM with KFold or Stratified KFold.
+import sys
 
 # Update 16/06/2018:
 # - Added Payment Rate feature
@@ -25,9 +26,12 @@ import time
 from contextlib import contextmanager
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import roc_auc_score, roc_curve, recall_score, precision_score, f1_score
-from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import roc_auc_score, roc_curve, recall_score, precision_score, f1_score, mean_squared_error, \
+    r2_score, mean_absolute_error
+from sklearn.model_selection import KFold, StratifiedKFold, GridSearchCV
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
@@ -39,6 +43,13 @@ from sklearn.metrics import confusion_matrix
 import mlflow.lightgbm
 from sklearn.model_selection import train_test_split
 from imblearn.over_sampling import SMOTE
+import shap
+from sklearn.preprocessing import OrdinalEncoder
+from evidently import Report
+from evidently import Dataset, DataDefinition
+from evidently.descriptors import Sentiment, TextLength, Contains
+from evidently.presets import TextEvals
+from evidently.presets import DataDriftPreset
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -63,7 +74,7 @@ def timer(title):
 def one_hot_encoder(df, nan_as_category=True):
     original_columns = list(df.columns)
     categorical_columns = [col for col in df.columns if df[col].dtype == 'object']
-    df = pd.get_dummies(df, columns=categorical_columns, dummy_na=nan_as_category)
+    df = pd.get_dummies(df, columns=categorical_columns, dummy_na=nan_as_category, dtype=float)
     new_columns = [c for c in df.columns if c not in original_columns]
     return df, new_columns
 
@@ -275,14 +286,70 @@ def credit_card_balance(num_rows=None, nan_as_category=True):
     return cc_agg
 
 def split_and_smote(df):
+    print("🔍 Vérification train_x :")
+    print("  - NaN:", df.isna().sum().sum())
+
+    # Nettoyage des valeurs infinies
+    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+    non_numeric_cols = df.select_dtypes(exclude=['number']).columns.tolist()
+    print("Colonnes non numériques :", non_numeric_cols)
+    #sys.exit()
+    # Imputation avant SMOTE
+    #imputer = SimpleImputer(strategy='mean')
+    imputer = SimpleImputer(strategy='constant',fill_value= 0) # ne focntionne pas !
+    df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+
+    """report = Report([
+        DataDriftPreset(method="psi")
+    ],
+        include_tests="True")
+    my_eval = report.run(df_imputed.iloc[:150000], df_imputed.iloc[150000:])
+    my_eval.save_html("rapport.html")
+    sys.exit(0)"""
     X_train, X_test, y_train, y_test = train_test_split(
-        df.drop(['TARGET'],axis=1), df['TARGET'],
-        test_size=0.20, random_state=42, stratify=df['TARGET'])
-    print("PRE SMOTE Train shape: {}, test shape: {}".format(X_train.shape, X_test.shape))
-    # Application de SMOTE sur le train uniquement
+        df_imputed.drop(['TARGET'],axis=1), df_imputed['TARGET'],
+        test_size=0.20, random_state=42, stratify=df_imputed['TARGET'])
+    print("Fin d'imputation : Train shape: {}, test shape: {}".format(X_train.shape, X_test.shape))
 
     return X_train, y_train, X_test, y_test
 
+def custom_cout_metier(y_true, y_pred_proba):
+    """
+    Calcule un coût métier basé sur un ratio FN > FP
+    """
+
+    best_cost = float('inf')
+    best_threshold = 0.5
+    best_fp = best_fn = 0
+
+    # Itérer sur plusieurs seuils de classification
+    for thresh in np.linspace(0.80, 0.99, 3):
+        y_pred = (y_pred_proba >= thresh).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+
+        cost = fp * 1 + fn * 10  # coût métier : 1 pour FP, 10 pour FN
+
+        if cost < best_cost:
+            best_cost = cost
+            best_threshold = thresh
+            best_fp, best_fn = fp, fn
+    return {
+        'best_cost': best_cost,
+        'best_threshold': best_threshold,
+        'false_positives': best_fp,
+        'false_negatives': best_fn
+    }
+
+def metric_cout_metier(y_pred, dataset):
+    """
+    Fonction compatible avec LightGBM `feval`
+    """
+    y_true = dataset.get_label()
+    result = custom_cout_metier(y_true, y_pred)
+
+    # LightGBM attend : (nom_metric, valeur, is_higher_better)
+    return ('business_cost', result['best_cost'], False)
 
 # LightGBM GBDT with KFold or Stratified KFold
 # Parameters from Tilii kernel: https://www.kaggle.com/tilii7/olivier-lightgbm-parameters-by-bayesian-opt/code
@@ -300,6 +367,12 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     # Log des paramètres d'expérience
     mlflow.log_param("n_folds", num_folds)
 
+    if debug:
+        X_train = X_train.iloc[:10000].copy()
+        X_test = X_test.iloc[:10000].copy()
+        y_train = y_train.iloc[:10000].copy()
+        print("🔧 Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
+
     # Divide in training/validation and test data
     train_df = X_train
     test_df = X_test
@@ -316,11 +389,6 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     sub_preds = np.zeros(test_df.shape[0])
     feature_importance_df = pd.DataFrame()
     feats = [f for f in train_df.columns if f not in ['TARGET', 'SK_ID_CURR', 'SK_ID_BUREAU', 'SK_ID_PREV', 'index']]
-
-
-    # Colonnes à exclure
-    excluded = ['TARGET', 'SK_ID_CURR', 'SK_ID_BUREAU', 'SK_ID_PREV', 'index']
-    feats = [f for f in train_df.columns if f not in excluded]
 
     # Nettoyage des noms de colonnes
     clean_feats = clean_column_names(feats)
@@ -356,16 +424,10 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         train_x, train_y = train_df[feats].iloc[train_idx], y_train.iloc[train_idx]
         valid_x, valid_y = train_df[feats].iloc[valid_idx], y_train.iloc[valid_idx]
 
-        # Nettoyage des valeurs infinies
-        train_x.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-        # Imputation avant SMOTE
-        imputer = SimpleImputer(strategy='mean')
-        train_x_imputed = pd.DataFrame(imputer.fit_transform(train_x), columns=train_x.columns)
-
         smote = SMOTE(random_state=42)
-        train_x, train_y = smote.fit_resample(train_x_imputed, train_y)
+        train_x, train_y = smote.fit_resample(train_x, train_y)
         print("POST SMOTE Train shape: {}, test shape: {}".format(X_train.shape, y_train.shape))
+
         # Construction des datasets LightGBM avec support des colonnes catégorielles
         lgb_train = lgb.Dataset(train_x, label=train_y, categorical_feature=categorical_clean, free_raw_data=False)
         lgb_valid = lgb.Dataset(valid_x, label=valid_y, categorical_feature=categorical_clean, reference=lgb_train, free_raw_data=False)
@@ -383,20 +445,23 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
             'min_split_gain': 0.0222415,
             'min_child_weight': 39.3259775,
             'verbosity': -1,
-            'nthread': 4,
+            'nthread': 8,
             'metric': 'auc',
             'is_unbalanced': True
         }
+        print("########TRAINING#######")
         fold_start_time = time.time()
+        #feval=metric_cout_metier,
         clf = lgb.train(
             params,
             lgb_train,
-            num_boost_round=10000,
+            num_boost_round=1000,
             valid_sets=[lgb_train, lgb_valid],
             valid_names=['train', 'valid'],
+            feval=metric_cout_metier,
             callbacks=[
-                lgb.early_stopping(stopping_rounds=200),
-                lgb.log_evaluation(period=200)
+                lgb.early_stopping(stopping_rounds=50),
+                lgb.log_evaluation(period=300)
             ]
         )
         fold_duration = time.time() - fold_start_time
@@ -421,30 +486,28 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         y_valid_pred = (valid_pred >= best_threshold).astype(int)
 
         #Detection des faux negatif (défaillants non detectés)
-        print(valid_pred)
+
         preds_binary = (valid_pred > 0.5).astype(int)
         tn, fp, fn, tp = confusion_matrix(valid_y, preds_binary).ravel()
         false_negative_rate = fn / (fn + tp)
-        """mlflow.log_metric(f"fold_{n_fold}_false_negative_rate", false_negative_rate)
-        mlflow.log_metric(f"fold_{n_fold}_recall", recall_score(valid_y, preds_binary))
-        mlflow.log_metric(f"fold_{n_fold}_precision", precision_score(valid_y, preds_binary))"""
+        print("Faux negatifs : {}", false_negative_rate)
         # Log MLflow
         mlflow.log_metric(f"fold_{n_fold+1}_train_auc", train_score)
         mlflow.log_metric(f"fold_{n_fold+1}_valid_auc", valid_score)
         mlflow.log_params(params)
-        """mlflow.log_metric(f"fold_{n_fold}_f1_score", best_f1)
-        mlflow.log_metric(f"false_negative_rate", false_negative_rate)
-        mlflow.log_metric(f"recall", recall_score(valid_y, preds_binary))
-        mlflow.log_metric(f"precision", precision_score(valid_y, preds_binary))
-        mlflow.log_metric(f"f1", f1_score(valid_y, preds_binary))"""
+
+        result = custom_cout_metier(valid_y, y_valid_pred)
+        mlflow.log_metric("business_cost", result['best_cost'])
+        mlflow.log_metric("best_threshold", result['best_threshold'])
+        mlflow.log_metric("false_negatives", result['false_negatives'])
+        mlflow.log_metric("false_positives", result['false_positives'])
+
         # Log MLflow
         mlflow.log_metric(f"train_auc", train_score)
         mlflow.log_metric(f"valid_auc", valid_score)
 
         oof_preds[valid_idx] = clf.predict(valid_x, num_iteration=clf.best_iteration)
         sub_preds += clf.predict(test_df[feats], num_iteration=clf.best_iteration) / folds.n_splits
-
-
 
         fold_importance_df = pd.DataFrame()
         fold_importance_df["feature"] = feats
@@ -465,11 +528,11 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     print("Dummy AUC score: {:.6f}".format(dummy_score))
     mlflow.log_metric("dummy_auc", dummy_score)
 
-    print('Full AUC score %.6f' % roc_auc_score(train_df['TARGET'], oof_preds))
+    print('Full AUC score %.6f' % roc_auc_score(y_train, oof_preds))
     # Write submission file and plot feature importance
     if not debug:
-        test_df['TARGET'] = sub_preds
-        test_df[['SK_ID_CURR', 'TARGET']].to_csv(submission_file_name, index=False)
+        y_test = sub_preds
+        test_df[['SK_ID_CURR']].to_csv(submission_file_name, index=False)
     display_importances(feature_importance_df)
 
     # 🔽 Enregistrer l'importance des features comme artefact MLflow
@@ -479,12 +542,191 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
 
     # 🔽 Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
     final_model = lgb.LGBMClassifier(**params)
-    final_model.fit(train_df[feats], train_df['TARGET'], categorical_feature=categorical_clean)
+    final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-
+    show_shap_summary(final_model,train_df[feats])
     return feature_importance_df
 
+def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, stratified=True, debug=False):
+    # Tentative de conversion des colonnes object en float
+    # Liste pour les colonnes catégorielles problématiques
+
+    print("#### STARTING lightGBM avec GRIDSEARSHCV ####")
+
+    categorical = []
+    for col in X_train.columns:
+        if X_train[col].dtype == 'object':
+            X_train[col] = X_train[col].astype('category')
+            X_test[col] = X_test[col].astype('category')
+            categorical.append(col)
+
+    # Log des paramètres d'expérience
+    mlflow.log_param("n_folds", num_folds)
+
+    if debug:
+        X_train = X_train.iloc[:1000].copy()
+        X_test = X_test.iloc[:1000].copy()
+        y_train = y_train.iloc[:1000].copy()
+        y_test = y_test.iloc[:1000].copy()
+        print("🔧 Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
+
+    # Divide in training/validation and test data
+    train_df = X_train
+    test_df = X_test
+    print("Starting LightGBM with GridSearchCV. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
+    #del df
+    gc.collect()
+
+    # Create arrays and dataframes to store results
+    oof_preds = np.zeros(train_df.shape[0])
+    sub_preds = np.zeros(test_df.shape[0])
+    feature_importance_df = pd.DataFrame()
+    feats = [f for f in train_df.columns if f not in ['TARGET', 'SK_ID_CURR', 'SK_ID_BUREAU', 'SK_ID_PREV', 'index']]
+
+    # Nettoyage des noms de colonnes
+    clean_feats = clean_column_names(feats)
+    rename_dict = dict(zip(feats, clean_feats))
+
+    train_df.rename(columns=rename_dict, inplace=True)
+    test_df.rename(columns=rename_dict, inplace=True)
+    feats = clean_feats
+
+    # Log de la liste des features dans MLflow
+    mlflow.log_param("feature_count", len(feats))
+    mlflow.log_dict({"features": feats}, "features.json")
+    with open("features_used.txt", "w") as f:
+        f.write("\n".join(feats))
+
+    mlflow.log_artifact("features_used.txt")
+
+    # Nettoyage des noms de colonnes catégorielles également
+    categorical_clean = [rename_dict[c] for c in categorical if c in rename_dict]
+
+    # Supposons que train_df est ton DataFrame d'entraînement
+    feature_types = train_df.dtypes.reset_index()
+    feature_types.columns = ['feature', 'dtype']
+
+    # Sauvegarder dans un fichier temporaire
+    features_path = "feature_types.csv"
+    feature_types.to_csv(features_path, index=False)
+
+    # Enregistrer comme artefact dans MLflow
+    mlflow.log_artifact(features_path, artifact_path="metadata")
+
+    # Définir les paramètres de base
+    params = {
+        'objective': 'binary',
+        'boosting_type': 'gbdt',
+        'metric': 'auc',
+        'is_unbalanced': True,
+        'verbosity': -1,
+        'subsample_for_bin': 300000,
+        'nthread': 8
+    }
+
+    param_grid = {
+        'learning_rate': [0.01, 0.02],  # Ajout d'une troisième valeur pour le taux d'apprentissage
+        'num_leaves': [20, 30],  # Ajout d'une troisième valeur pour le nombre de feuilles
+        'max_depth': [5],  # Ajout d'une troisième valeur pour la profondeur maximale
+        'reg_alpha': [0.04],  # Une seule valeur pour la régularisation alpha
+        'reg_lambda': [0.07],  # Une seule valeur pour la régularisation lambda
+    }
+
+    # Créer un modèle LightGBM compatible avec scikit-learn
+    lgb_model = lgb.LGBMClassifier(**params)
+
+    # Initialiser GridSearchCV
+    grid_search = GridSearchCV(
+        estimator=lgb_model,
+        param_grid=param_grid,
+        scoring='roc_auc',
+        cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+        verbose=0,
+        n_jobs=-1
+    )
+
+    smote = SMOTE(random_state=42)
+    train_x, train_y = smote.fit_resample(train_df, y_train)
+    print("POST SMOTE Train shape: {}, test shape: {}".format(X_train.shape, y_train.shape))
+
+    # Exécuter GridSearchCV
+    grid_search.fit(train_x, train_y)
+
+    # Afficher les meilleurs paramètres et le meilleur score
+    print("Meilleurs paramètres trouvés: ", grid_search.best_params_)
+    print("Meilleur score: ", grid_search.best_score_)
+
+    # Utiliser le meilleur modèle pour faire des prédictions
+    best_clf = grid_search.best_estimator_
+    train_pred = best_clf.predict_proba(train_x)[:, 1]
+    valid_pred = best_clf.predict_proba(X_test)[:, 1]
+
+    # Calculer les scores
+    train_score = roc_auc_score(train_y, train_pred)
+    valid_score = roc_auc_score(y_test, valid_pred)
+
+    print('Train AUC : %.6f' % train_score)
+    print('Valid AUC : %.6f' % valid_score)
+
+    # Log MLflow
+    mlflow.log_metric("train_auc", train_score)
+    mlflow.log_metric("valid_auc", valid_score)
+    mlflow.log_params(grid_search.best_params_)
+
+    # Nettoyage
+    del best_clf, train_x, train_y
+    gc.collect()
+
+    # Trouver le meilleur seuil pour F1-score
+    best_threshold = 0.5
+    best_f1 = 0
+    for thresh in np.linspace(0.1, 0.9, 81):
+        y_pred = (valid_pred >= thresh).astype(int)
+        f1 = f1_score(y_test, y_pred)
+        if f1 > best_f1:
+            best_f1 = f1
+            best_threshold = thresh
+    y_valid_pred = (valid_pred >= best_threshold).astype(int)
+
+    dummy = DummyClassifier(strategy="most_frequent")
+    dummy.fit(train_df[feats], y_train)
+    dummy_preds = dummy.predict_proba(train_df[feats])[:, 1]
+    dummy_score = roc_auc_score(y_train, dummy_preds)
+
+    print("Dummy AUC score: {:.6f}".format(dummy_score))
+    mlflow.log_metric("dummy_auc", dummy_score)
+
+    print('Full AUC score %.6f' % roc_auc_score(y_train, oof_preds))
+    # Write submission file and plot feature importance
+    if not debug:
+        y_test = sub_preds
+        test_df[['SK_ID_CURR']].to_csv(submission_file_name, index=False)
+
+    # 🔽 Enregistrer l'importance des features comme artefact MLflow
+    fi_path = "feature_importances.csv"
+    feature_importance_df.to_csv(fi_path, index=False)
+    mlflow.log_artifact(fi_path)
+
+    # 🔽 Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
+    final_model = lgb.LGBMClassifier(**params)
+    final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
+
+    # Récupérer les importances des caractéristiques
+    importances = final_model.feature_importances_
+
+    # Créer le DataFrame
+    feature_importance_df = pd.DataFrame({
+        'feature': feats,
+        'importance': importances
+    })
+
+    display_importances(feature_importance_df)
+
+    mlflow.lightgbm.log_model(final_model, artifact_path="model")
+    show_shap_summary(final_model,train_df[feats])
+    print("#### FIN lightGBM avec GRIDSEARSHCV ####")
+    return feature_importance_df
 
 # Display/plot feature importance
 def display_importances(feature_importance_df_):
@@ -498,6 +740,242 @@ def display_importances(feature_importance_df_):
     plt.tight_layout()
     plt.savefig('lgbm_importances01.png')
 
+def show_shap_summary(model, X, max_display=20, plot_type="bar"):
+    """
+    Affiche un graphe SHAP summary pour un modèle LightGBM ou LGBMClassifier
+    :param model: modèle entraîné (lgb.Booster ou LGBMClassifier)
+    :param X: DataFrame utilisé pour le calcul des SHAP values
+    :param max_display: nombre de features à afficher
+    :param plot_type: "bar" ou "dot"
+    """
+    # Vérification : convertir en Booster si nécessaire
+    if hasattr(model, "booster"):
+        booster = model.booster_
+    else:
+        booster = model
+
+    # Initialisation de l'explainer
+    explainer = shap.TreeExplainer(booster)
+
+    # Calcul des valeurs SHAP
+    shap_values = explainer.shap_values(X)
+
+    # Affichage summary plot
+    plt.figure(figsize=(12, 6))
+    shap.summary_plot(shap_values, X, max_display=max_display, plot_type=plot_type)
+    plt.savefig('lgbm_shap_global.png')
+    show_shap_for_single_prediction(model, X)
+
+def show_shap_for_single_prediction(model, X, row_index=1):
+    explainer = shap.TreeExplainer(model)
+    shap_values = explainer.shap_values(X)
+    plt.savefig('lgbm_shap_single.png')
+    shap.initjs()
+    return shap.force_plot(
+        explainer.expected_value,
+        shap_values[row_index, :],
+        X.iloc[row_index, :]
+    )
+
+def kfold_linear_regression(X_train, y_train, X_test, y_test, num_folds=5, debug=False):
+    # Conversion des colonnes catégorielles
+    categorical = []
+    for col in X_train.columns:
+        if X_train[col].dtype == 'object' or str(X_train[col].dtype).startswith('category'):
+            categorical.append(col)
+
+    mlflow.log_param("n_folds", num_folds)
+
+    train_df = X_train.copy()
+    test_df = X_test.copy()
+    print("Starting Linear Regression. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
+    gc.collect()
+
+    folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=42)
+
+    oof_preds = np.zeros(train_df.shape[0])
+    sub_preds = np.zeros(test_df.shape[0])
+    feature_importance_df = pd.DataFrame()
+    feats = [f for f in train_df.columns if f not in ['TARGET', 'SK_ID_CURR', 'index']]
+
+    # Nettoyage des noms de colonnes (si nécessaire)
+    clean_feats = [f.replace(" ", "_").replace("(", "").replace(")", "") for f in feats]
+    rename_dict = dict(zip(feats, clean_feats))
+    train_df.rename(columns=rename_dict, inplace=True)
+    test_df.rename(columns=rename_dict, inplace=True)
+    feats = clean_feats
+
+    mlflow.log_param("feature_count", len(feats))
+    mlflow.log_dict({"features": feats}, "features.json")
+    with open("features_used.txt", "w") as f:
+        f.write("\n".join(feats))
+    mlflow.log_artifact("features_used.txt")
+
+    for n_fold, (train_idx, valid_idx) in enumerate(folds.split(train_df[feats], y_train)):
+        train_x = train_df[feats].iloc[train_idx].copy()
+        valid_x = train_df[feats].iloc[valid_idx].copy()
+        train_y = y_train.iloc[train_idx]
+        valid_y = y_train.iloc[valid_idx]
+
+        # Modèle
+        model = LinearRegression()
+        model.fit(train_x, train_y)
+
+        valid_pred = model.predict(valid_x)
+        oof_preds[valid_idx] = valid_pred
+        sub_preds += model.predict(test_df[feats]) / folds.n_splits
+
+        # Scores
+        rmse = mean_squared_error(valid_y, valid_pred, squared=False)
+        r2 = r2_score(valid_y, valid_pred)
+        mae = mean_absolute_error(valid_y, valid_pred)
+
+        mlflow.log_metric(f"fold_{n_fold + 1}_rmse", rmse)
+        mlflow.log_metric(f"fold_{n_fold + 1}_r2", r2)
+        mlflow.log_metric(f"fold_{n_fold + 1}_mae", mae)
+
+        # Importance des features = coefficients
+        fold_importance_df = pd.DataFrame()
+        fold_importance_df["feature"] = feats
+        fold_importance_df["importance"] = model.coef_
+        fold_importance_df["fold"] = n_fold + 1
+        feature_importance_df = pd.concat([feature_importance_df, fold_importance_df], axis=0)
+
+        print(f"Fold {n_fold + 1} | RMSE: {rmse:.4f} | R²: {r2:.4f} | MAE: {mae:.4f}")
+        gc.collect()
+
+    # Résultats globaux
+    overall_rmse = mean_squared_error(y_train, oof_preds, squared=False)
+    overall_r2 = r2_score(y_train, oof_preds)
+    overall_mae = mean_absolute_error(y_train, oof_preds)
+
+    print("✅ Résultats globaux :")
+    print(f"RMSE: {overall_rmse:.4f} | R²: {overall_r2:.4f} | MAE: {overall_mae:.4f}")
+    mlflow.log_metric("overall_rmse", overall_rmse)
+    mlflow.log_metric("overall_r2", overall_r2)
+    mlflow.log_metric("overall_mae", overall_mae)
+
+    # Sauvegarde
+    fi_path = "feature_importances_linear.csv"
+    feature_importance_df.to_csv(fi_path, index=False)
+    mlflow.log_artifact(fi_path)
+
+    display_importances(feature_importance_df)
+
+    mlflow.lightgbm.log_model(model, artifact_path="model")
+
+    return feature_importance_df
+
+def kfold_random_forest(X_train, y_train, X_test, y_test, num_folds=5, stratified=True, debug=False):
+
+    mlflow.log_param("n_folds", num_folds)
+    mlflow.log_param("model", "RandomForestClassifier")
+
+    # Conversion des colonnes catégorielles
+    categorical = [col for col in X_train.columns if X_train[col].dtype == 'object' or str(X_train[col].dtype).startswith('category')]
+
+    if debug:
+        X_train = X_train.iloc[:10000].copy()
+        X_test = X_test.iloc[:10000].copy()
+        y_train = y_train.iloc[:10000].copy()
+        print("🔧 Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
+
+
+    train_df = X_train.copy()
+    test_df = X_test.copy()
+    print("Starting RandomForest. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
+    gc.collect()
+
+    folds = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=42) if stratified else KFold(n_splits=num_folds, shuffle=True, random_state=42)
+
+    oof_preds = np.zeros(train_df.shape[0])
+    sub_preds = np.zeros(test_df.shape[0])
+    feature_importance_df = pd.DataFrame()
+
+    feats = [f for f in train_df.columns if f not in ['TARGET', 'SK_ID_CURR', 'index']]
+
+    clean_feats = [f.replace(" ", "_").replace("(", "").replace(")", "") for f in feats]
+    rename_dict = dict(zip(feats, clean_feats))
+    train_df.rename(columns=rename_dict, inplace=True)
+    test_df.rename(columns=rename_dict, inplace=True)
+    feats = clean_feats
+
+    mlflow.log_param("feature_count", len(feats))
+    mlflow.log_dict({"features": feats}, "features.json")
+    with open("features_used_rf.txt", "w") as f:
+        f.write("\n".join(feats))
+    mlflow.log_artifact("features_used_rf.txt")
+
+    encoder = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+    imputer = SimpleImputer(strategy="mean")
+
+    for n_fold, (train_idx, valid_idx) in enumerate(folds.split(train_df[feats], y_train)):
+        train_x = train_df[feats].iloc[train_idx].copy()
+        valid_x = train_df[feats].iloc[valid_idx].copy()
+        train_y = y_train.iloc[train_idx]
+        valid_y = y_train.iloc[valid_idx]
+
+        # Encodage + imputation
+        if categorical:
+            train_x[categorical] = encoder.fit_transform(train_x[categorical])
+            valid_x[categorical] = encoder.transform(valid_x[categorical])
+
+        train_x = pd.DataFrame(imputer.fit_transform(train_x), columns=feats)
+        valid_x = pd.DataFrame(imputer.transform(valid_x), columns=feats)
+
+        # SMOTE
+        smote = SMOTE(random_state=42)
+        train_x, train_y = smote.fit_resample(train_x, train_y)
+
+        # Modèle RandomForest
+        params = {
+            'n_estimators': 200,
+            'max_depth': 10,
+            'random_state': 42,
+            'n_jobs': -1
+        }
+        mlflow.log_params(params)
+
+        model = RandomForestClassifier(**params)
+        model.fit(train_x, train_y)
+
+        # Prédictions
+        valid_pred_proba = model.predict_proba(valid_x)[:, 1]
+        oof_preds[valid_idx] = valid_pred_proba
+        sub_preds += model.predict_proba(imputer.transform(test_df[feats]))[:, 1] / folds.n_splits
+
+        # Scores
+        auc = roc_auc_score(valid_y, valid_pred_proba)
+        preds_binary = (valid_pred_proba >= 0.5).astype(int)
+        f1 = f1_score(valid_y, preds_binary)
+        tn, fp, fn, tp = confusion_matrix(valid_y, preds_binary).ravel()
+        fnr = fn / (fn + tp)
+
+        print(f"Fold {n_fold+1} | AUC: {auc:.4f} | F1: {f1:.4f} | FNR: {fnr:.4f}")
+        mlflow.log_metric(f"fold_{n_fold+1}_auc", auc)
+        mlflow.log_metric(f"fold_{n_fold+1}_f1", f1)
+        mlflow.log_metric(f"fold_{n_fold+1}_fnr", fnr)
+
+        # Feature importance
+        fold_importance_df = pd.DataFrame()
+        fold_importance_df["feature"] = feats
+        fold_importance_df["importance"] = model.feature_importances_
+        fold_importance_df["fold"] = n_fold + 1
+        feature_importance_df = pd.concat([feature_importance_df, fold_importance_df], axis=0)
+
+        gc.collect()
+
+    # Score global
+    overall_auc = roc_auc_score(y_train, oof_preds)
+    print(f"✅ AUC global : {overall_auc:.4f}")
+    mlflow.log_metric("overall_auc", overall_auc)
+
+    # Sauvegarde
+    fi_path = "feature_importances_rf.csv"
+    feature_importance_df.to_csv(fi_path, index=False)
+    mlflow.log_artifact(fi_path)
+
+    return feature_importance_df
 
 def main(debug=False):
     num_rows = 10000 if debug else None
@@ -532,18 +1010,29 @@ def main(debug=False):
         df = df.join(cc, how='left', on='SK_ID_CURR')
         del cc
         gc.collect()
-    with timer("Run LightGBM with kfold"):
-        print(df.describe())
-        print(df.info)
-        print(df['TARGET'].value_counts())
-        Xtr,yTr,Xtst,Ytst = split_and_smote(df)
-        feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=False, debug=True)
 
+    with timer("Run LightGBM with kfold and GRIDSEARCH"):
+        with mlflow.start_run():
+            Xtr,yTr,Xtst,Ytst = split_and_smote(df)
+            feat_importance = kfold_lightgbm_gridsearch(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=True, debug=True)
+
+    with timer("Run LightGBM with kfold"):
+        with mlflow.start_run():
+            print("pass")
+            #Xtr,yTr,Xtst,Ytst = split_and_smote(df)
+            #feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=True, debug=False)
+
+    with timer("Run Linear Regression with kfold"):
+        with mlflow.start_run():
+            feat_importance = kfold_linear_regression(Xtr,yTr,Xtst,Ytst, num_folds=2, debug=False)
+
+    with timer("Run Random Forest with kfold"):
+        with mlflow.start_run():
+            feat_importance = kfold_random_forest(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=True, debug=False)
 
 if __name__ == "__main__":
     submission_file_name = "submission_kernel02.csv"
     #with timer("Full model run"):
     mlflow.set_tracking_uri('http://localhost:5000')
     mlflow.lightgbm.autolog()
-    with mlflow.start_run():
-        main()
+    main()
