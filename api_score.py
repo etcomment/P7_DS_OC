@@ -1,3 +1,4 @@
+import gdown
 from flask import Flask, request, jsonify
 import joblib
 import pandas as pd
@@ -17,22 +18,34 @@ with open("model.pkl", "wb") as f:
 
 print("✅ Fichier modele téléchargé !")
 
-file_id = '1B2E6jfa1DZVdz5yGDeBitJ_0cS-qeUR2'  # à extraire de l'URL
-download_url = f'https://drive.google.com/uc?export=download&id={file_id}'
+file_id = "1k0VyQ6CzMXph0uKWeLbZp9MWvw_PNBwu"  # Remplace par ton ID
+destination = "test.csv"
 
-response = requests.get(download_url)
-with open("features_used.txt", "wb") as f:
-    f.write(response.content)
+#https://drive.google.com/file/d/1k0VyQ6CzMXph0uKWeLbZp9MWvw_PNBwu/view?usp=sharing
+# Construction de l'URL compatible gdown
+url = f"https://drive.google.com/uc?id={file_id}"
+# Téléchargement
+gdown.download(url, destination, quiet=False)
 
-print("✅ Fichier features téléchargé !")
+print("✅ Fichier données test téléchargé !")
 
 # Charger le modèle
 with open("model.pkl", "rb") as f:
     model = pickle.load(f)
 
 # Chargement de la liste des features
-with open("features_used.txt", "r") as f:
-    all_features = [line.strip() for line in f if line.strip()]
+print("Chargement du fichier de données")
+df_donnees = pd.read_csv("test.csv", index_col=False)
+#df_donnees.columns = df_donnees.columns.str.replace(r'[^\w]', '_', regex=True)
+cols1 = set(df_donnees.columns)
+cols2 = set(pd.read_csv("train.csv").columns)
+# Colonnes présentes dans df1 mais pas dans df2
+missing_in_df2 = cols1 - cols2
+# Colonnes présentes dans df2 mais pas dans df1
+missing_in_df1 = cols2 - cols1
+print(df_donnees.shape)
+print("❌ Colonnes manquantes dans df2 :", missing_in_df2)
+print("❌ Colonnes manquantes dans df1 :", missing_in_df1)
 
 @app.route("/")
 def index():
@@ -41,42 +54,26 @@ def index():
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        input_data = request.get_json()
+        id_client = request.form.get("id_client")
 
-        # Construction du DataFrame d'une seule ligne
-        input_df = pd.DataFrame([input_data])
+        if id_client is None:
+            return jsonify({"error": "id_client est requis."}), 400
 
-        # Ajout des colonnes manquantes avec NaN
-        for col in all_features:
-            if col not in input_df.columns:
-                input_df[col] = np.nan
+        ligne_client = df_donnees[df_donnees["SK_ID_CURR"] == int(id_client)]
 
-        # Réordonnancement des colonnes selon le modèle
-        input_df = input_df[all_features]
+        if ligne_client.empty:
+            return jsonify({"error": f"Aucun client trouvé avec l'id {id_client}."}), 404
+        first_column = df_donnees.columns[0]
+        # Supposons que le modèle prend toutes les colonnes sauf SK_ID_CURR
+        features = ligne_client.drop(columns=[first_column,"index","SK_ID_CURR"])
 
-        # Forcer le typage des colonnes catégorielles si nécessaire :
-        input_df['CC_NAME_CONTRACT_STATUS_Active_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Active_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Active_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Active_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Approved_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Approved_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Approved_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Approved_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Completed_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Completed_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Completed_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Completed_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Demand_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Demand_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Demand_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Demand_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Refused_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Refused_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Refused_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Refused_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Sent_proposal_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Signed_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_Signed_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_Signed_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_Signed_MAX'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_nan_MIN'] = input_df['CC_NAME_CONTRACT_STATUS_nan_MIN'].astype('category')
-        input_df['CC_NAME_CONTRACT_STATUS_nan_MAX'] = input_df['CC_NAME_CONTRACT_STATUS_nan_MAX'].astype('category')
+        # Prédiction (proba d'être "défaillant" ou "bon")
+        proba = model.predict_proba(features)[0, 1]  # classe 1 (défaut)
 
-
-        # Prédiction
-        score = model.predict_proba(input_df)[0, 1]
-
-        return jsonify({'score': float(score)})
+        return jsonify({
+            "id_client": int(id_client),
+            "score": float(proba)
+        })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 400

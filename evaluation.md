@@ -6,11 +6,11 @@ Sélectionner et entraîner des modèles adaptés à une problématique métier 
 - [X] **CE2** Le candidat a créé de nouvelles variables à partir de variables existantes.  
 - [ ] **CE3** Le candidat a réalisé des transformations mathématiques lorsque c'est requis pour transformer les distributions de variables.  
 - [ ] **CE4** Le candidat a normalisé les variables lorsque c'est requis.  
-- [ ] **CE5** Le candidat a défini sa stratégie d’élaboration d’un modèle pour répondre à un besoin métier.  
+- [X] **CE5** Le candidat a défini sa stratégie d’élaboration d’un modèle pour répondre à un besoin métier.  
     - Cela signifie dans ce projet que l’étudiant a présenté son approche méthodologique de modélisation dans son support de présentation pendant la soutenance et est capable de répondre à des questions à ce sujet.  
 - [X] **CE6** Le candidat a choisi la ou les variables cibles pertinentes.  
 - [ ] **CE7** Le candidat a vérifié qu'il n’y a pas de problème de data leakage.  
-- [ ] **CE8** Le candidat a testé plusieurs algorithmes de façon cohérente, en partant des plus simples vers les plus complexes (au minimum un linéaire et un non linéaire).  
+- [X] **CE8** Le candidat a testé plusieurs algorithmes de façon cohérente, en partant des plus simples vers les plus complexes (au minimum un linéaire et un non linéaire).  
 
 ---
 
@@ -24,8 +24,8 @@ Adapter les paramètres afin de choisir le modèle le plus performant pour la pr
 - [X] **CE3** Le candidat a séparé les données en train/test pour évaluer correctement et détecter l'overfitting.  
 - [X] **CE4** Le candidat a mis en place un modèle de référence (dummyRegressor ou dummyClassifier).  
 - [X] **CE5** Le candidat a pris en compte l’éventuel déséquilibre des classes.  
-- [ ] **CE6** Le candidat a optimisé les hyperparamètres des algorithmes.  
-- [ ] **CE7** Le candidat a mis en place une validation croisée (GridSearchCV, RandomizedSearchCV, etc.).  
+- [X] **CE6** Le candidat a optimisé les hyperparamètres des algorithmes.  
+- [X] **CE7** Le candidat a mis en place une validation croisée (GridSearchCV, RandomizedSearchCV, etc.).  
     - Cela implique :  
         - Une cross-validation du dataset train.  
         - Un test initial d’hyperparamètres pour chaque algorithme.  
