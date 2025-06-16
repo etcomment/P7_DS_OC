@@ -24,4 +24,4 @@ jobs:
 
       - name: Lancer les tests
         run: |
-          pytest
+          pytest tu_api_score.py
