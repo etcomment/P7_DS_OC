@@ -1,32 +1,42 @@
-# test_api.py
-import unittest
-from main import app
+import pytest
+from api_score import app, df_donnees
 
-class APITestCase(unittest.TestCase):
-    def setUp(self):
-        self.app = app.test_client()
-        self.headers = {'Content-Type': 'application/json'}
+# Création d'un client de test Flask
+@pytest.fixture
+def client():
+    app.testing = True
+    with app.test_client() as client:
+        yield client
 
-    def test_index(self):
-        res = self.app.get('/')
-        self.assertEqual(res.status_code, 200)
-        self.assertIn('message', res.get_json())
+# Exemple de récupération d’un ID client existant
+@pytest.fixture
+def valid_id():
+    return int(df_donnees["SK_ID_CURR"].dropna().sample(1).values[0])
 
-    def test_prediction_valid(self):
-        payload = {
-            "features": [0.5]*20  # Simule une entrée valide avec 20 features
-        }
-        res = self.app.post('/predict', json=payload, headers=self.headers)
-        self.assertEqual(res.status_code, 200)
-        self.assertIn('score', res.get_json())
+# ✅ Test de l’endpoint racine
+def test_index(client):
+    res = client.get("/")
+    assert res.status_code == 200
+    assert "message" in res.get_json()
 
-    def test_prediction_invalid(self):
-        payload = {
-            "bad_input": [0.5]*20
-        }
-        res = self.app.post('/predict', json=payload, headers=self.headers)
-        self.assertEqual(res.status_code, 400)
-        self.assertIn('error', res.get_json())
+# ❌ Test sans id_client
+def test_predict_missing_id(client):
+    res = client.post("/predict", data={})  # pas d'id_client
+    assert res.status_code == 400
+    assert "error" in res.get_json()
 
-if __name__ == '__main__':
-    unittest.main()
+# ❌ Test avec un id_client inexistant
+def test_predict_invalid_id(client):
+    res = client.post("/predict", data={"id_client": 999999999})
+    assert res.status_code == 404
+    assert "error" in res.get_json()
+
+# ✅ Test avec un id_client valide
+def test_predict_valid_id(client, valid_id):
+    res = client.post("/predict", data={"id_client": valid_id})
+    json_data = res.get_json()
+
+    assert res.status_code == 200
+    assert "score" in json_data
+    assert isinstance(json_data["score"], float)
+    assert 0.0 <= json_data["score"] <= 1.0
