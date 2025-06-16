@@ -36,7 +36,7 @@ with open("model.pkl", "rb") as f:
 # Chargement de la liste des features
 print("Chargement du fichier de données")
 df_donnees = pd.read_csv("test.csv", index_col=False)
-#df_donnees.columns = df_donnees.columns.str.replace(r'[^\w]', '_', regex=True)
+"""#df_donnees.columns = df_donnees.columns.str.replace(r'[^\w]', '_', regex=True)
 cols1 = set(df_donnees.columns)
 cols2 = set(pd.read_csv("train.csv").columns)
 # Colonnes présentes dans df1 mais pas dans df2
@@ -46,7 +46,7 @@ missing_in_df1 = cols2 - cols1
 print(df_donnees.shape)
 print("❌ Colonnes manquantes dans df2 :", missing_in_df2)
 print("❌ Colonnes manquantes dans df1 :", missing_in_df1)
-
+"""
 @app.route("/")
 def index():
     return jsonify({"message": "API de scoring bancaire (LightGBM) prête à l'emploi."})
