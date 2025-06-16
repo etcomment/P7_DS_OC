@@ -336,9 +336,8 @@ def business_cost_score(y_true, y_pred_proba, fn_cost=10, fp_cost=1, threshold=0
 
 def metric_cout_metier(y_pred, dataset):
     y_true = dataset.get_label()
-    seuil = 0.8  # seuil fixe ici
+    seuil = 0.5  # seuil fixe ici
     y_pred_bin = (y_pred >= seuil).astype(int)
-
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred_bin).ravel()
     cost = fn * 10 + fp * 1
     return "business_cost", cost, False  # False = on cherche à MINIMISER
@@ -449,8 +448,10 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         train_x, train_y = train_df[feats].iloc[train_idx], y_train.iloc[train_idx]
         valid_x, valid_y = train_df[feats].iloc[valid_idx], y_train.iloc[valid_idx]
 
+        sample_weights = train_y.map({1: 10, 0: 1})
+
         # Construction des datasets LightGBM avec support des colonnes catégorielles
-        lgb_train = lgb.Dataset(train_x, label=train_y, categorical_feature=categorical_clean, free_raw_data=False)
+        lgb_train = lgb.Dataset(train_x, label=train_y, weight=sample_weights, categorical_feature=categorical_clean, free_raw_data=False)
         lgb_valid = lgb.Dataset(valid_x, label=valid_y, categorical_feature=categorical_clean, reference=lgb_train, free_raw_data=False)
 
         params = {
@@ -468,11 +469,11 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
             'verbosity': -1,
             'nthread': 8,
             'metric': 'auc',
-            'is_unbalanced': True
+            'is_unbalanced': False
         }
         print("########TRAINING#######")
         fold_start_time = time.time()
-        feval=metric_cout_metier,
+
         clf = lgb.train(
             params,
             lgb_train,
@@ -510,6 +511,25 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
 
         oof_preds[valid_idx] = clf.predict(valid_x, num_iteration=clf.best_iteration)
         sub_preds += clf.predict(test_df[feats], num_iteration=clf.best_iteration) / folds.n_splits
+
+        #export des faux negatifs
+        # prédiction binaire avec seuil optimal
+        preds_binary = (valid_pred >= result["best_threshold"]).astype(int)
+
+        # repérage des faux négatifs (vrai = 1, prédit = 0)
+        faux_negatifs_mask = (valid_y == 1) & (preds_binary == 0)
+
+        # extraire les lignes
+        faux_negatifs_df = valid_x.loc[faux_negatifs_mask].copy()
+        faux_negatifs_df["vrai_label"] = valid_y[faux_negatifs_mask]
+        faux_negatifs_df["pred_proba"] = valid_pred[faux_negatifs_mask]
+
+        # sauvegarde dans un fichier CSV
+        csv_path = f"faux_negatifs_fold_{n_fold + 1}.csv"
+        faux_negatifs_df.to_csv(csv_path, index=False)
+
+        # Log MLflow si tu veux
+        mlflow.log_artifact(csv_path, artifact_path="faux_negatifs")
 
         fold_importance_df = pd.DataFrame()
         fold_importance_df["feature"] = feats
@@ -1003,7 +1023,7 @@ def main(debug=False):
             print("#### LightGBM ####")
             Xtr,yTr,Xtst,Ytst = split_and_impute(df, impute=False)
             feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
-
+            sys.exit(0)
     with timer("Run LightGBM with kfold and GRIDSEARCH"):
         with mlflow.start_run():
             print("#### LightGBM avec GridSearchCV ####")
