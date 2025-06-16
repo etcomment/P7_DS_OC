@@ -1,8 +1,6 @@
 import gdown
 from flask import Flask, request, jsonify
-import joblib
 import pandas as pd
-import numpy as np
 import requests
 import pickle
 import waitress
@@ -21,12 +19,10 @@ print("✅ Fichier modele téléchargé !")
 file_id = "1k0VyQ6CzMXph0uKWeLbZp9MWvw_PNBwu"  # Remplace par ton ID
 destination = "test.csv"
 
-#https://drive.google.com/file/d/1k0VyQ6CzMXph0uKWeLbZp9MWvw_PNBwu/view?usp=sharing
 # Construction de l'URL compatible gdown
 url = f"https://drive.google.com/uc?id={file_id}"
 # Téléchargement
 gdown.download(url, destination, quiet=False)
-
 print("✅ Fichier données test téléchargé !")
 
 # Charger le modèle
