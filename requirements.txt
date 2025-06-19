@@ -10,7 +10,6 @@ pandas==2.2.3
 Requests==2.32.3
 scikit_learn==1.4.2
 seaborn==0.13.2
-streamlit==1.32.0
 waitress~=3.0.2
 gdown~=5.2.0
 pytest-bdd==8.1.0

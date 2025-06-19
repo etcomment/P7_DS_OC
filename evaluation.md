@@ -62,10 +62,10 @@ Assurer l’intégration et la diffusion du modèle auprès de collaborateurs.
 
 Déploiement d’un modèle sous forme d’API sur une plateforme Cloud.
 
-- [ ] **CE1** Le candidat a défini un pipeline de déploiement continu.  
+- [X] **CE1** Le candidat a défini un pipeline de déploiement continu.  
 - [X] **CE2** Le modèle a été déployé sous forme d’API (Flask, etc.) avec retour de prédiction.  
 - [X] **CE3** Le pipeline de déploiement déploie l’API sur un serveur Cloud.  
-- [ ] **CE4** Des tests unitaires automatisés ont été mis en place (ex : pyTest).  
+- [X] **CE4** Des tests unitaires automatisés ont été mis en place (ex : pyTest).  
 - [X] **CE5** L’API est indépendante de l’application qui l’utilise.
 
 ---
@@ -76,7 +76,7 @@ Maintenance et suivi pour garantir des prédictions performantes dans le temps.
 
 - [X] **CE1** Le candidat a défini une stratégie de suivi de performance du modèle.  
     - Par exemple, analyse de data drift entre train et test.  
-- [ ] **CE2** Le candidat a mis en place un stockage des événements et une gestion d’alerte en cas de dégradation.  
+- [X] **CE2** Le candidat a mis en place un stockage des événements et une gestion d’alerte en cas de dégradation.  
     - Simulation de drift dans un notebook, analyse via `evidently`, création d’un tableau HTML.  
 - [X] **CE3** Le candidat a analysé la stabilité du modèle dans le temps et défini des actions correctives.  
     - Analyse du tableau `evidently`, conclusion sur un éventuel drift.
