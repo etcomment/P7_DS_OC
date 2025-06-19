@@ -8,7 +8,7 @@ lightgbm==4.6.0
 numpy<2
 pandas==2.2.3
 Requests==2.32.3
-#scikit_learn==1.4.2
+scikit_learn==1.4.2
 #seaborn==0.13.2
 waitress~=3.0.2
 gdown~=5.2.0
