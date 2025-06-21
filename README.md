@@ -17,16 +17,18 @@ Ce dépôt contient une API développée en Flask permettant de produire un scor
 
 ### Prérequis
 
-- Python 3.8+
+- Python 3.10+
 - pip
+- Droit d'accès au repo
+- Venv
 
 ### Étapes
 
 1. Cloner le dépôt :
 
 ```bash
-git clone https://github.com/<utilisateur>/<nom-du-repo>.git
-cd <nom-du-repo>
+git https://github.com/etcomment/P7_DS_OC.git
+cd P7_DS_OC
 ```
 
 2. Créer un environnement virtuel et activer :
@@ -49,10 +51,12 @@ pip install -r requirements.txt
 L'API se lance avec le fichier principal `api_score.py`.
 
 ```bash
-python api_score.py
+python GUILLAUME_Stiven_1_API_052025.py
 ```
 
-Le serveur est exposé par défaut sur le port `10000`.
+Le serveur est exposé par défaut sur le port `10000`, en conformité avec les précos de render.com
+
+Il est cependant possible de modifier si besoin ce parametrage 
 
 ---
 
@@ -65,15 +69,15 @@ Le serveur est exposé par défaut sur le port `10000`.
 Exemple avec `curl` :
 
 ```bash
-curl -X POST http://localhost:10000/predict -F id_client=100002
+curl -X POST https://p7-ds-oc.onrender.com/predict -F id_client=100002
 ```
 
 Réponse attendue :
 
 ```json
 {
-  "id_client": 100002,
-  "score": 0.231984
+  "id_client": 100001,
+  "score": 0.059778321535366476
 }
 ```
 
@@ -100,17 +104,8 @@ Les cas testés incluent :
 
 ## 6. Dépendances
 
-Fichier `requirements.txt` typique :
+Voir le fichier `requirements.txt`  :
 
-```
-Flask
-waitress
-pandas
-numpy
-scikit-learn
-gdown
-pytest
-```
 
 ---
 
@@ -125,6 +120,14 @@ Les contributions sont les bienvenues. Pour contribuer :
 
 ---
 
-## 8. Contact
+## 8. Todo list
+
+Vous ne savez pas comment contribuer ? Voici une liste d'éléments qu'on a besoin pour l'API :
+
+- Retour de Shap
+- Completer / Fiabiliser les TU
+
+---
+## 9. Contact
 
 Pour toute question, remarque ou problème technique, merci de créer une issue sur le dépôt GitHub.

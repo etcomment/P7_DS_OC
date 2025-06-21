@@ -1,5 +1,5 @@
 import pytest
-from api_score import app, df_donnees
+from GUILLAUME_Stiven_1_API_052025 import app, df_donnees
 
 # Création d'un client de test Flask
 @pytest.fixture
