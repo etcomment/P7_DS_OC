@@ -16,30 +16,32 @@ user_input = {}
 columns = st.columns(3)
 
 # Champs obligatoires
-user_id = columns[1].text_input("SK_ID_CURR *", max_chars=10)
+user_id = columns[1].text_input("id_client *", max_chars=6)
 
-user_input["SK_ID_CURR"] = user_id
+user_input["id_client"] = user_id
 
 
 # ---------- BOUTON POUR ENVOYER LA REQUÊTE ----------
 if st.button("✅ Vérifier l’éligibilité"):
 
     # Vérifier que les champs obligatoires sont bien fournis
-    if "SK_ID_CURR" not in user_input:
+    if "id_client" not in user_input:
         st.error("Veuillez renseigner tous les champs obligatoires.")
     else:
         try:
             # Appel à l'API Flask (local ou déployée)
-            api_url = "http://127.0.0.1:5001/predict"
-            response = requests.post(api_url, json=user_input)
+            print(user_input)
+            api_url = "https://p7-ds-oc.onrender.com/predict"
+            #api_url = "https://127.0.0.1:10000/predict"
+            response = requests.post(api_url, user_input)
 
             if response.status_code == 200:
                 result = response.json()
                 score = result["score"]
 
-                st.markdown(f"### 🎯 Score obtenu : **{score:.2%}**")
+                st.markdown(f"### 🎯 Score obtenu : **{score:.2%}** (Seuil d'inegibilité : 47%)")
 
-                if score >= 0.5:
+                if score <= 0.47:
                     st.success("✅ Éligible")
                 else:
                     st.error("❌ Non éligible")

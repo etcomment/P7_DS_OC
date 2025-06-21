@@ -26,6 +26,7 @@ import time
 from contextlib import contextmanager
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
+from scipy.stats import boxcox, yeojohnson
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression, RidgeClassifier
@@ -302,15 +303,9 @@ def split_and_impute(df, impute=True):
     df_test = (df[df['TARGET'].isna()].drop(columns=['TARGET']))
     df_test.to_csv("test.csv", index=False)
     df = df[df["TARGET"].notna()].copy()
-
-    """report = Report([
-        DataDriftPreset(method="psi")
-    ],
-        include_tests="True")
-    # rapport a faire entre application train et application test
-    my_eval = report.run(df.drop(columns=['TARGET']), df_test)
-    my_eval.save_html("rapport.html")"""
-
+    #on split dans un val pour pouvoir avoir un jeu de donnée dont on connais les target, et qu'on va pouvoir utiliser pour valider le modele
+    df, df_val = train_test_split(df,test_size=0.01, random_state=42, stratify=df['TARGET'])
+    df_val.to_csv("val.csv")
 
     df_imputed = pd.DataFrame(df, columns=df.columns)
     df_imputed.to_csv("train.csv")
@@ -319,8 +314,19 @@ def split_and_impute(df, impute=True):
         print("Imutation des données")
         imputer = SimpleImputer(strategy='most_frequent')
         df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
-        #df_imputed.to_csv("test.csv")
-        #sys.exit()
+        colonnes_onehot = [col for col in df_imputed.columns
+                           if df_imputed[col].nunique() == 2 and set(df_imputed[col].unique()).issubset({0, 1})]
+        for i in df.columns[4:]:
+            if i not in colonnes_onehot:
+                skewness = df[i].skew()
+                if (skewness < -50) or (skewness > 50):
+                    try :
+                        print("Skew " + str(i) + " :" + str(skewness))
+                        transformed, _ = yeojohnson(df[i])
+                        df.loc[:, i] = transformed.astype(df[i].dtype)
+                    except ValueError as e:
+                        print(e)
+        df_imputed.to_csv("train_imputed.csv", index=False)
 
     X_train, X_test, y_train, y_test = train_test_split(
         df_imputed.drop(['TARGET'],axis=1), df_imputed['TARGET'],
@@ -456,7 +462,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
 
         params = {
             'objective': 'binary',
-            'boosting_type': 'goss',
+            'boosting_type': 'gbdt',
             'learning_rate': 0.02,
             'num_leaves': 34,
             'colsample_bytree': 0.9497036,
@@ -557,17 +563,17 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         test_df[['SK_ID_CURR']].to_csv(submission_file_name, index=False)
     display_importances(feature_importance_df)
 
-    # 🔽 Enregistrer l'importance des features comme artefact MLflow
+    # Enregistrer l'importance des features comme artefact MLflow
     fi_path = "feature_importances.csv"
     feature_importance_df.to_csv(fi_path, index=False)
     mlflow.log_artifact(fi_path)
 
-    # 🔽 Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
+    # Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
     final_model = lgb.LGBMClassifier(**params)
     final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    show_shap_summary(final_model,train_df[feats])
+    #show_shap_summary(final_model,train_df[feats])
 
     return feature_importance_df
 
@@ -718,12 +724,12 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
         y_test = sub_preds
         test_df[['SK_ID_CURR']].to_csv(submission_file_name, index=False)
 
-    # 🔽 Enregistrer l'importance des features comme artefact MLflow
+    # Enregistrer l'importance des features comme artefact MLflow
     fi_path = "feature_importances.csv"
     feature_importance_df.to_csv(fi_path, index=False)
     mlflow.log_artifact(fi_path)
 
-    # 🔽 Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
+    # Logger un modèle entraîné (exemple : le dernier modèle d'entraînement en mémoire, ou un retrain global)
     final_model = lgb.LGBMClassifier(**params)
     final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
 
@@ -739,7 +745,7 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
     display_importances(feature_importance_df)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    show_shap_summary(final_model,train_df[feats])
+    #show_shap_summary(final_model,train_df[feats])
     print("#### FIN lightGBM avec GRIDSEARSHCV ####")
     resume_modeles("LightGBM avec grid", valid_score, -grid_search.best_score_)
     return feature_importance_df
@@ -866,7 +872,7 @@ def kfold_ridge_classification(X_train, y_train, X_test, y_test, num_folds=5, de
 
     display_importances(feature_importance_df)
 
-    # 💰 Coût global
+    # Coût global
     business_global = find_best_threshold_business(y_train, oof_preds)
     print(f"✅ Coût métier global : {business_global['best_cost']} @ seuil {business_global['best_threshold']:.2f}")
     mlflow.log_metric("overall_business_cost", business_global['best_cost'])
@@ -948,7 +954,7 @@ def kfold_random_forest(X_train, y_train, X_test, y_test, num_folds=5, stratifie
         # Scores
         auc = roc_auc_score(valid_y, valid_pred_proba)
 
-        # 💰 Ajout de la métrique métier
+        # Ajout de la métrique métier
         business = find_best_threshold_business(valid_y, valid_pred_proba)
         mlflow.log_metric(f"fold_{n_fold + 1}_business_cost", business['best_cost'])
         mlflow.log_metric(f"fold_{n_fold + 1}_threshold", business['best_threshold'])
@@ -970,7 +976,7 @@ def kfold_random_forest(X_train, y_train, X_test, y_test, num_folds=5, stratifie
     overall_auc = roc_auc_score(y_train, oof_preds)
     print(f"✅ AUC global : {overall_auc:.4f}")
     mlflow.log_metric("overall_auc", overall_auc)
-    # 💰 Coût global
+    # Coût global
     business_global = find_best_threshold_business(y_train, oof_preds)
     print(f"✅ Coût métier global : {business_global['best_cost']} @ seuil {business_global['best_threshold']:.2f}")
     mlflow.log_metric("overall_business_cost", business_global['best_cost'])
@@ -1023,7 +1029,6 @@ def main(debug=False):
             print("#### LightGBM ####")
             Xtr,yTr,Xtst,Ytst = split_and_impute(df, impute=False)
             feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
-            sys.exit(0)
     with timer("Run LightGBM with kfold and GRIDSEARCH"):
         with mlflow.start_run():
             print("#### LightGBM avec GridSearchCV ####")

@@ -32,17 +32,7 @@ with open("model.pkl", "rb") as f:
 # Chargement de la liste des features
 print("Chargement du fichier de données")
 df_donnees = pd.read_csv("test.csv", index_col=False)
-"""#df_donnees.columns = df_donnees.columns.str.replace(r'[^\w]', '_', regex=True)
-cols1 = set(df_donnees.columns)
-cols2 = set(pd.read_csv("train.csv").columns)
-# Colonnes présentes dans df1 mais pas dans df2
-missing_in_df2 = cols1 - cols2
-# Colonnes présentes dans df2 mais pas dans df1
-missing_in_df1 = cols2 - cols1
-print(df_donnees.shape)
-print("❌ Colonnes manquantes dans df2 :", missing_in_df2)
-print("❌ Colonnes manquantes dans df1 :", missing_in_df1)
-"""
+
 @app.route("/")
 def index():
     return jsonify({"message": "API de scoring bancaire (LightGBM) prête à l'emploi."})
@@ -50,6 +40,7 @@ def index():
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
+        print("toto")
         id_client = request.form.get("id_client")
 
         if id_client is None:
@@ -58,7 +49,7 @@ def predict():
         ligne_client = df_donnees[df_donnees["SK_ID_CURR"] == int(id_client)]
 
         if ligne_client.empty:
-            return jsonify({"error": f"Aucun client trouvé avec l'id {id_client}."}), 404
+            return jsonify({"error": f"Aucun client avec l'id {id_client}."}), 404
         first_column = df_donnees.columns[0]
         # Supposons que le modèle prend toutes les colonnes sauf SK_ID_CURR
         features = ligne_client.drop(columns=[first_column,"index","SK_ID_CURR"])
@@ -76,3 +67,5 @@ def predict():
 
 if __name__ == "__main__":
     waitress.serve(app, host="0.0.0.0", port=10000)
+    #waitress.serve(app, host="127.0.0.1", port=10000)
+
