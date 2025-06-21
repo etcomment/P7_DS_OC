@@ -26,6 +26,7 @@ import time
 from contextlib import contextmanager
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
+from scipy.stats import boxcox, yeojohnson
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LinearRegression, RidgeClassifier
@@ -302,7 +303,8 @@ def split_and_impute(df, impute=True):
     df_test = (df[df['TARGET'].isna()].drop(columns=['TARGET']))
     df_test.to_csv("test.csv", index=False)
     df = df[df["TARGET"].notna()].copy()
-    df, df_val = train_test_split(df,test_size=0.05, random_state=42, stratify=df['TARGET'])
+    #on split dans un val pour pouvoir avoir un jeu de donnée dont on connais les target, et qu'on va pouvoir utiliser pour valider le modele
+    df, df_val = train_test_split(df,test_size=0.01, random_state=42, stratify=df['TARGET'])
     df_val.to_csv("val.csv")
 
     df_imputed = pd.DataFrame(df, columns=df.columns)
@@ -312,6 +314,19 @@ def split_and_impute(df, impute=True):
         print("Imutation des données")
         imputer = SimpleImputer(strategy='most_frequent')
         df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+        colonnes_onehot = [col for col in df_imputed.columns
+                           if df_imputed[col].nunique() == 2 and set(df_imputed[col].unique()).issubset({0, 1})]
+        for i in df.columns[4:]:
+            if i not in colonnes_onehot:
+                skewness = df[i].skew()
+                if (skewness < -50) or (skewness > 50):
+                    try :
+                        print("Skew " + str(i) + " :" + str(skewness))
+                        transformed, _ = yeojohnson(df[i])
+                        df.loc[:, i] = transformed.astype(df[i].dtype)
+                    except ValueError as e:
+                        print(e)
+        df_imputed.to_csv("train_imputed.csv", index=False)
 
     X_train, X_test, y_train, y_test = train_test_split(
         df_imputed.drop(['TARGET'],axis=1), df_imputed['TARGET'],
@@ -558,7 +573,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    show_shap_summary(final_model,train_df[feats])
+    #show_shap_summary(final_model,train_df[feats])
 
     return feature_importance_df
 
@@ -730,7 +745,7 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
     display_importances(feature_importance_df)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    show_shap_summary(final_model,train_df[feats])
+    #show_shap_summary(final_model,train_df[feats])
     print("#### FIN lightGBM avec GRIDSEARSHCV ####")
     resume_modeles("LightGBM avec grid", valid_score, -grid_search.best_score_)
     return feature_importance_df
@@ -1013,8 +1028,8 @@ def main(debug=False):
         with mlflow.start_run():
             print("#### LightGBM ####")
             Xtr,yTr,Xtst,Ytst = split_and_impute(df, impute=False)
-            feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=2, stratified=True, debug=False)
-    """with timer("Run LightGBM with kfold and GRIDSEARCH"):
+            feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
+    with timer("Run LightGBM with kfold and GRIDSEARCH"):
         with mlflow.start_run():
             print("#### LightGBM avec GridSearchCV ####")
             Xtr,yTr,Xtst,Ytst = split_and_impute(df)
@@ -1028,7 +1043,7 @@ def main(debug=False):
     with timer("Run Random Forest with kfold"):
         with mlflow.start_run():
             print("#### Random Forest ####")
-            feat_importance = kfold_random_forest(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)"""
+            feat_importance = kfold_random_forest(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
     mlflow.log_artifact("resume_modeles.csv")
 if __name__ == "__main__":
     submission_file_name = "submission_kernel02.csv"
