@@ -40,7 +40,6 @@ def index():
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
-        print("toto")
         id_client = request.form.get("id_client")
 
         if id_client is None:
@@ -55,7 +54,7 @@ def predict():
         features = ligne_client.drop(columns=[first_column,"index","SK_ID_CURR"])
 
         # Prédiction (proba d'être "défaillant" ou "bon")
-        proba = model.predict_proba(features)[0, 1]  # classe 1 (défaut)
+        proba = model.predict_proba(features)[0, 1]
 
         return jsonify({
             "id_client": int(id_client),

@@ -9,7 +9,6 @@
 # - One-hot encoding for categorical features
 # All tables are joined with the application DF using the SK_ID_CURR key (except bureau_balance).
 # You can use LightGBM with KFold or Stratified KFold.
-import sys
 
 # Update 16/06/2018:
 # - Added Payment Rate feature
@@ -19,39 +18,30 @@ import sys
 #(base) stiven@stiven-fixe:~/Documents/formation data scientist/stiven/source/P7_DS_OC$ mlflow ui --backend-store-uri file:/home/stiven/Documents/formation\ data\ scientist/stiven/source/P7_DS_OC/mlruns
 
 
+import gc
+import os
+import time
+import warnings
+from contextlib import contextmanager
+
+import lightgbm as lgb
+import mlflow
+import mlflow.data
+import mlflow.lightgbm
 import numpy as np
 import pandas as pd
-import gc
-import time
-from contextlib import contextmanager
-from lightgbm import LGBMClassifier
-import lightgbm as lgb
-from scipy.stats import boxcox, yeojohnson
+from evidently import Report
+from evidently.presets import DataDriftPreset
+from imblearn.over_sampling import SMOTE
+from scipy.stats import yeojohnson
+from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
-from sklearn.linear_model import LinearRegression, RidgeClassifier
-from sklearn.metrics import roc_auc_score, roc_curve, recall_score, precision_score, f1_score, mean_squared_error, \
-    r2_score, mean_absolute_error, make_scorer
-from sklearn.model_selection import KFold, StratifiedKFold, GridSearchCV
-import matplotlib.pyplot as plt
-import seaborn as sns
-import warnings
-import mlflow
-from sklearn.dummy import DummyClassifier
-import mlflow.data
-from mlflow.data.pandas_dataset import PandasDataset
+from sklearn.linear_model import RidgeClassifier
 from sklearn.metrics import confusion_matrix
-import mlflow.lightgbm
+from sklearn.metrics import roc_auc_score, make_scorer
+from sklearn.model_selection import KFold, StratifiedKFold, GridSearchCV
 from sklearn.model_selection import train_test_split
-from imblearn.over_sampling import SMOTE
-import shap
-from sklearn.preprocessing import OrdinalEncoder
-from evidently import Report
-from evidently import Dataset, DataDefinition
-from evidently.descriptors import Sentiment, TextLength, Contains
-from evidently.presets import TextEvals
-from evidently.presets import DataDriftPreset
-import os
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -292,7 +282,7 @@ def do_drift_report():
     report = Report([
         DataDriftPreset(method="psi")
     ],
-        include_tests="True")
+        include_tests=True)
     # rapport a faire entre application train et application test
     my_eval = report.run(pd.read_csv("train.csv"), pd.read_csv("test.csv"))
     my_eval.save_html("rapport.html")
@@ -310,7 +300,7 @@ def split_and_impute(df, impute=True):
     df_imputed = pd.DataFrame(df, columns=df.columns)
     df_imputed.to_csv("train.csv")
 
-    if (impute) :
+    if impute:
         print("Imutation des données")
         imputer = SimpleImputer(strategy='most_frequent')
         df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
@@ -461,7 +451,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         lgb_valid = lgb.Dataset(valid_x, label=valid_y, categorical_feature=categorical_clean, reference=lgb_train, free_raw_data=False)
 
         params = {
-            'objective': 'binary',
+            'objective': 'binary', # fonction custom pour l'entrainement
             'boosting_type': 'gbdt',
             'learning_rate': 0.02,
             'num_leaves': 34,
@@ -756,48 +746,6 @@ def display_importances(feature_importance_df_):
                                                                                                    ascending=False)[
            :40].index
     best_features = feature_importance_df_.loc[feature_importance_df_.feature.isin(cols)]
-    #plt.figure(figsize=(8, 10))
-    #sns.barplot(x="importance", y="feature", data=best_features.sort_values(by="importance", ascending=False))
-    #plt.title('LightGBM Features (avg over folds)')
-    #plt.tight_layout()
-    #plt.savefig('lgbm_importances01.png')
-
-def show_shap_summary(model, X, max_display=20, plot_type="bar"):
-    """
-    Affiche un graphe SHAP summary pour un modèle LightGBM ou LGBMClassifier
-    :param model: modèle entraîné (lgb.Booster ou LGBMClassifier)
-    :param X: DataFrame utilisé pour le calcul des SHAP values
-    :param max_display: nombre de features à afficher
-    :param plot_type: "bar" ou "dot"
-    """
-    # Vérification : convertir en Booster si nécessaire
-    if hasattr(model, "booster"):
-        booster = model.booster_
-    else:
-        booster = model
-
-    # Initialisation de l'explainer
-    explainer = shap.TreeExplainer(booster)
-
-    # Calcul des valeurs SHAP
-    shap_values = explainer.shap_values(X)
-
-    # Affichage summary plot
-    #plt.figure(figsize=(12, 6))
-    #shap.summary_plot(shap_values, X, max_display=max_display, plot_type=plot_type)
-    #plt.savefig('lgbm_shap_global.png')
-    show_shap_for_single_prediction(model, X)
-
-def show_shap_for_single_prediction(model, X, row_index=1):
-    explainer = shap.TreeExplainer(model)
-    shap_values = explainer.shap_values(X)
-    #plt.savefig('lgbm_shap_single.png')
-    shap.initjs()
-    return shap.force_plot(
-        explainer.expected_value,
-        shap_values[row_index, :],
-        X.iloc[row_index, :]
-    )
 
 def kfold_ridge_classification(X_train, y_train, X_test, y_test, num_folds=5, debug=False):
 
