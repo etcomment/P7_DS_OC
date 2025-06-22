@@ -38,7 +38,7 @@ from sklearn.dummy import DummyClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import RidgeClassifier
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score, fbeta_score
 from sklearn.metrics import roc_auc_score, make_scorer
 from sklearn.model_selection import KFold, StratifiedKFold, GridSearchCV
 from sklearn.model_selection import train_test_split
@@ -302,10 +302,14 @@ def split_and_impute(df, impute=True):
 
     if impute:
         print("Imutation des données")
+        # Remplacer les valeurs infinies par NaN
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
         imputer = SimpleImputer(strategy='most_frequent')
         df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
         colonnes_onehot = [col for col in df_imputed.columns
                            if df_imputed[col].nunique() == 2 and set(df_imputed[col].unique()).issubset({0, 1})]
+        cols_with_inf = df.columns[np.isinf(df).any(axis=0)]
+        print("Colonnes avec des valeurs infinies détectées :", cols_with_inf.tolist())
         for i in df.columns[4:]:
             if i not in colonnes_onehot:
                 skewness = df[i].skew()
@@ -314,6 +318,8 @@ def split_and_impute(df, impute=True):
                         print("Skew " + str(i) + " :" + str(skewness))
                         transformed, _ = yeojohnson(df[i])
                         df.loc[:, i] = transformed.astype(df[i].dtype)
+                        skewness = df[i].skew()
+                        print("Skew " + str(i) + " :" + str(skewness))
                     except ValueError as e:
                         print(e)
         df_imputed.to_csv("train_imputed.csv", index=False)
@@ -337,6 +343,35 @@ def metric_cout_metier(y_pred, dataset):
     tn, fp, fn, tp = confusion_matrix(y_true, y_pred_bin).ravel()
     cost = fn * 10 + fp * 1
     return "business_cost", cost, False  # False = on cherche à MINIMISER
+
+def find_best_threshold_business(y_true, y_proba, cost_fn=10, cost_fp=1):
+    best_threshold = 0.5
+    best_cost = float("inf")
+    best_f1 = 0
+    best_y_pred = None
+
+    thresholds = np.linspace(0.01, 0.99, 99)
+    for thresh in thresholds:
+        y_pred = (y_proba >= thresh).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+        cost = cost_fn * fn + cost_fp * fp
+        f1 = f1_score(y_true, y_pred)
+
+        if cost < best_cost:
+            best_cost = cost
+            best_threshold = thresh
+            best_f1 = f1
+            best_y_pred = y_pred
+    print(str(best_cost) + "--"+str(best_threshold)+"--"+str(best_f1)+"--"+str(best_y_pred))
+    return {
+        "best_threshold": best_threshold,
+        "best_cost": best_cost,
+        "f1_at_best_threshold": best_f1,
+        "false_negatives": fn,
+        "false_positives": fp,
+        "y_pred": best_y_pred  # si besoin de stocker les classes finales
+    }
+
 
 def resume_modeles(modele, auc, cout):
     file_path = "resume_modeles.csv"
@@ -453,7 +488,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
             'num_leaves': 34,
             'colsample_bytree': 0.9497036,
             'subsample': 0.8715623,
-            'max_depth': 8,
+            'max_depth': 0,
             'reg_alpha': 0.041545473,
             'reg_lambda': 0.0735294,
             'min_split_gain': 0.0222415,
@@ -520,7 +555,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         csv_path = f"faux_negatifs_fold_{n_fold + 1}.csv"
         faux_negatifs_df.to_csv(csv_path, index=False)
 
-        # Log MLflow si tu veux
+        # Log MLflow
         mlflow.log_artifact(csv_path, artifact_path="faux_negatifs")
 
         fold_importance_df = pd.DataFrame()
@@ -685,11 +720,36 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
     print('Train AUC : %.6f' % train_score)
     print('Valid AUC : %.6f' % valid_score)
 
+    # 2. F1 score standard (seuil à 0.5)
+    try:
+        f1_default = f1_score((valid_pred >= 0.5).astype(int), y_test)
+        print(f"F1 par défaut (seuil=0.5): {f1_default:.4f}")
+        mlflow.log_metric("f1_default", f1_default)
+    except :
+        print("erreur sur le f1")
+    try:
+        # 3. F1 score au meilleur seuil métier
+        result = find_best_threshold_business((valid_pred >= 0.5).astype(int), y_test)
+        print(f"✅ F1 au seuil optimisé ({result['best_threshold']:.2f}): {result['f1_at_best_threshold']:.4f}")
+        print(f" Coût métier : {result['best_cost']}")
+        mlflow.log_metric("f1_best_thresh", result["f1_at_best_threshold"])
+    except :
+        print("erreur sur le best f1")
+    try:
+        # 4. Fβ score à seuil 0.5 si tu veux
+        fbeta_default = fbeta_score((valid_pred >= 0.5).astype(int),y_test , beta=2)
+        print(f" Fβ-score (β=2, seuil=0.5) : {fbeta_default:.4f}")
+        mlflow.log_metric("fbeta_default", fbeta_default)
+    except :
+        print("erreur sur le beta")
+
     # Log MLflow
     mlflow.log_metric("train_auc", train_score)
     mlflow.log_metric("valid_auc", valid_score)
     mlflow.log_metric("business_cost_score", -grid_search.best_score_)
     mlflow.log_params(grid_search.best_params_)
+
+
 
     # Nettoyage
     del best_clf, train_x, train_y
@@ -968,8 +1028,8 @@ def main(debug=False):
     with timer("Run LightGBM with kfold"):
         with mlflow.start_run():
             print("#### LightGBM ####")
-            Xtr,yTr,Xtst,Ytst = split_and_impute(df, impute=False)
-            feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
+            #Xtr,yTr,Xtst,Ytst = split_and_impute(df, impute=False)
+            #feat_importance = kfold_lightgbm(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
     with timer("Run LightGBM with kfold and GRIDSEARCH"):
         with mlflow.start_run():
             print("#### LightGBM avec GridSearchCV ####")
@@ -979,12 +1039,12 @@ def main(debug=False):
     with timer("Run ridge classification with kfold"):
         with mlflow.start_run():
             print("#### Ridge ####")
-            feat_importance = kfold_ridge_classification(Xtr,yTr,Xtst,Ytst, num_folds=5, debug=False)
+            #feat_importance = kfold_ridge_classification(Xtr,yTr,Xtst,Ytst, num_folds=5, debug=False)
 
     with timer("Run Random Forest with kfold"):
         with mlflow.start_run():
             print("#### Random Forest ####")
-            feat_importance = kfold_random_forest(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
+            #feat_importance = kfold_random_forest(Xtr,yTr,Xtst,Ytst, num_folds=5, stratified=True, debug=False)
     mlflow.log_artifact("resume_modeles.csv")
 if __name__ == "__main__":
     submission_file_name = "submission_kernel02.csv"
