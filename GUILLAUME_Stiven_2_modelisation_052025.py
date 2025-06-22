@@ -372,9 +372,7 @@ def find_best_threshold_business(y_true, y_pred_proba, fn_cost=10, fp_cost=1):
 
 # LightGBM GBDT with KFold or Stratified KFold
 # Parameters from Tilii kernel: https://www.kaggle.com/tilii7/olivier-lightgbm-parameters-by-bayesian-opt/code
-#def kfold_lightgbm(df, num_folds, stratified=True, debug=False):
 def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True, debug=False):
-    # Tentative de conversion des colonnes object en float
     # Liste pour les colonnes catégorielles problématiques
     categorical = []
     for col in X_train.columns:
@@ -390,14 +388,14 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         X_train = X_train.iloc[:10000].copy()
         X_test = X_test.iloc[:10000].copy()
         y_train = y_train.iloc[:10000].copy()
-        print("🔧 Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
+        print(" Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
 
     # Divide in training/validation and test data
     train_df = X_train
     test_df = X_test
     print("Starting LightGBM. Train shape: {}, test shape: {}".format(train_df.shape, test_df.shape))
     print("#### STARTING lightGBM  ####")
-    #del df
+
     gc.collect()
     # Cross validation model
     if stratified:
@@ -423,17 +421,14 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     mlflow.log_dict({"features": feats}, "features.json")
     with open("features_used.txt", "w") as f:
         f.write("\n".join(feats))
-
     mlflow.log_artifact("features_used.txt")
 
     # Nettoyage des noms de colonnes catégorielles également
     categorical_clean = [rename_dict[c] for c in categorical if c in rename_dict]
 
-    # Supposons que train_df est ton DataFrame d'entraînement
+    # Sauvegardedes features types
     feature_types = train_df.dtypes.reset_index()
     feature_types.columns = ['feature', 'dtype']
-
-    # Sauvegarder dans un fichier temporaire
     features_path = "feature_types.csv"
     feature_types.to_csv(features_path, index=False)
 
@@ -444,6 +439,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         train_x, train_y = train_df[feats].iloc[train_idx], y_train.iloc[train_idx]
         valid_x, valid_y = train_df[feats].iloc[valid_idx], y_train.iloc[valid_idx]
 
+        #définition d'un poids pour l'équilibrage
         sample_weights = train_y.map({1: 10, 0: 1})
 
         # Construction des datasets LightGBM avec support des colonnes catégorielles
@@ -451,7 +447,7 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
         lgb_valid = lgb.Dataset(valid_x, label=valid_y, categorical_feature=categorical_clean, reference=lgb_train, free_raw_data=False)
 
         params = {
-            'objective': 'binary', # fonction custom pour l'entrainement
+            'objective': 'binary', # fonction custom pour l'entrainement qui pourrait etre mise ici
             'boosting_type': 'gbdt',
             'learning_rate': 0.02,
             'num_leaves': 34,
@@ -563,12 +559,10 @@ def kfold_lightgbm(X_train, y_train, X_test, y_test, num_folds, stratified=True,
     final_model.fit(train_df[feats], y_train, categorical_feature=categorical_clean)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    #show_shap_summary(final_model,train_df[feats])
 
     return feature_importance_df
 
 def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, stratified=True, debug=False):
-    # Tentative de conversion des colonnes object en float
     # Liste pour les colonnes catégorielles problématiques
 
     print("#### STARTING lightGBM avec GRIDSEARSHCV ####")
@@ -588,7 +582,7 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
         X_test = X_test.iloc[:10000].copy()
         y_train = y_train.iloc[:10000].copy()
         y_test = y_test.iloc[:10000].copy()
-        print("🔧 Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
+        print(" Mode debug activé : jeu d'entraînement réduit à 10 000 lignes")
 
     # Divide in training/validation and test data
     train_df = X_train
@@ -735,7 +729,6 @@ def kfold_lightgbm_gridsearch(X_train, y_train, X_test, y_test, num_folds, strat
     display_importances(feature_importance_df)
 
     mlflow.lightgbm.log_model(final_model, artifact_path="model")
-    #show_shap_summary(final_model,train_df[feats])
     print("#### FIN lightGBM avec GRIDSEARSHCV ####")
     resume_modeles("LightGBM avec grid", valid_score, -grid_search.best_score_)
     return feature_importance_df
